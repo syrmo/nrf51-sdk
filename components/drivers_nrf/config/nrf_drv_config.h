@@ -20,7 +20,9 @@
 #define CLOCK_CONFIG_IRQ_PRIORITY       APP_IRQ_PRIORITY_LOW
 
 /* GPIOTE */
-#define GPIOTE_ENABLED 0
+#ifndef GPIOTE_ENABLED
+  #define GPIOTE_ENABLED 0
+#endif
 
 #if (GPIOTE_ENABLED == 1)
 #define GPIOTE_CONFIG_USE_SWI_EGU false
@@ -29,7 +31,9 @@
 #endif
 
 /* TIMER */
-#define TIMER0_ENABLED 0
+#ifndef TIMER0_ENABLED
+  #define TIMER0_ENABLED 0
+#endif
 
 #if (TIMER0_ENABLED == 1)
 #define TIMER0_CONFIG_FREQUENCY    NRF_TIMER_FREQ_16MHz
@@ -40,7 +44,9 @@
 #define TIMER0_INSTANCE_INDEX      0
 #endif
 
-#define TIMER1_ENABLED 0
+#ifndef TIMER1_ENABLED
+  #define TIMER1_ENABLED 0
+#endif
 
 #if (TIMER1_ENABLED == 1)
 #define TIMER1_CONFIG_FREQUENCY    NRF_TIMER_FREQ_16MHz
@@ -50,8 +56,10 @@
 
 #define TIMER1_INSTANCE_INDEX      (TIMER0_ENABLED)
 #endif
- 
-#define TIMER2_ENABLED 0
+
+#ifndef TIMER2_ENABLED
+  #define TIMER2_ENABLED 0
+#endif
 
 #if (TIMER2_ENABLED == 1)
 #define TIMER2_CONFIG_FREQUENCY    NRF_TIMER_FREQ_16MHz
@@ -65,7 +73,9 @@
 #define TIMER_COUNT (TIMER0_ENABLED + TIMER1_ENABLED + TIMER2_ENABLED)
 
 /* RTC */
-#define RTC0_ENABLED 0
+#ifndef RTC0_ENABLED
+  #define RTC0_ENABLED 0
+#endif
 
 #if (RTC0_ENABLED == 1)
 #define RTC0_CONFIG_FREQUENCY    32678
@@ -75,7 +85,9 @@
 #define RTC0_INSTANCE_INDEX      0
 #endif
 
-#define RTC1_ENABLED 0
+#ifndef RTC1_ENABLED
+  #define RTC1_ENABLED 0
+#endif
 
 #if (RTC1_ENABLED == 1)
 #define RTC1_CONFIG_FREQUENCY    32768
@@ -90,7 +102,9 @@
 #define NRF_MAXIMUM_LATENCY_US 2000
 
 /* RNG */
-#define RNG_ENABLED 0
+#ifndef RNG_ENABLED
+  #define RNG_ENABLED 0
+#endif
 
 #if (RNG_ENABLED == 1)
 #define RNG_CONFIG_ERROR_CORRECTION true
@@ -100,7 +114,9 @@
 
 
 /* QDEC */
-#define QDEC_ENABLED 0
+#ifndef QDEC_ENABLED
+  #define QDEC_ENABLED 0
+#endif
 
 #if (QDEC_ENABLED == 1)
 #define QDEC_CONFIG_REPORTPER    NRF_QDEC_REPORTPER_10
@@ -116,7 +132,9 @@
 #endif
 
 /* LPCOMP */
-#define LPCOMP_ENABLED 0
+#ifndef LPCOMP_ENABLED
+  #define LPCOMP_ENABLED 0
+#endif
 
 #if (LPCOMP_ENABLED == 1)
 #define LPCOMP_CONFIG_REFERENCE    NRF_LPCOMP_REF_SUPPLY_FOUR_EIGHT
@@ -126,7 +144,9 @@
 #endif
 
 /* WDT */
-#define WDT_ENABLED 0
+#ifndef WDT_ENABLED
+  #define WDT_ENABLED 0
+#endif
 
 #if (WDT_ENABLED == 1)
 #define WDT_CONFIG_BEHAVIOUR     NRF_WDT_BEHAVIOUR_RUN_SLEEP
