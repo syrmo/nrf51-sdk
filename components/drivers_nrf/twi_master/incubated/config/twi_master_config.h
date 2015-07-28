@@ -12,6 +12,8 @@
 #ifndef TWI_MASTER_CONFIG
 #define TWI_MASTER_CONFIG
 
+#include "app_custom_conf.h"
+
 #ifndef TWI_MASTER_CONFIG_CLOCK_PIN_NUMBER
   #define TWI_MASTER_CONFIG_CLOCK_PIN_NUMBER (24U)
 #endif
