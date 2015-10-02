@@ -15,7 +15,6 @@
 #include <dfu_types.h>
 #include <stddef.h>
 #include <string.h>
-#include "boards.h"
 #include "nrf51.h"
 #include "nrf_sdm.h"
 #include "nrf_gpio.h"
@@ -36,52 +35,9 @@
 #include "bootloader.h"
 #include "dfu_ble_svc_internal.h"
 #include "nrf_delay.h"
-
-#define DFU_REV_MAJOR                        0x00                                                    /** DFU Major revision number to be exposed. */
-#define DFU_REV_MINOR                        0x06                                                    /** DFU Minor revision number to be exposed. */
-#define DFU_REVISION                         ((DFU_REV_MAJOR << 8) | DFU_REV_MINOR)                  /** DFU Revision number to be exposed. Combined of major and minor versions. */
-#define ADVERTISING_LED_PIN_NO               BSP_LED_0                                               /**< Is on when device is advertising. */
-#define CONNECTED_LED_PIN_NO                 BSP_LED_1                                               /**< Is on when device has connected. */
-#define DFU_SERVICE_HANDLE                   0x000C                                                  /**< Handle of DFU service when DFU service is first service initialized. */
-#define BLE_HANDLE_MAX                       0xFFFF                                                  /**< Max handle value is BLE. */
-
-#define DEVICE_NAME                          "DfuTarg"                                               /**< Name of device. Will be included in the advertising data. */
-#define MANUFACTURER_NAME                    "NordicSemiconductor"                                   /**< Manufacturer. Will be passed to Device Information Service. */
-
-#define MIN_CONN_INTERVAL                    (uint16_t)(MSEC_TO_UNITS(15, UNIT_1_25_MS))             /**< Minimum acceptable connection interval (11.25 milliseconds). */
-#define MAX_CONN_INTERVAL                    (uint16_t)(MSEC_TO_UNITS(30, UNIT_1_25_MS))             /**< Maximum acceptable connection interval (15 milliseconds). */
-#define SLAVE_LATENCY                        0                                                       /**< Slave latency. */
-#define CONN_SUP_TIMEOUT                     (4 * 100)                                               /**< Connection supervisory timeout (4 seconds). */
-
-#define APP_TIMER_PRESCALER                  0                                                       /**< Value of the RTC1 PRESCALER register. */
-
-#define FIRST_CONN_PARAMS_UPDATE_DELAY       APP_TIMER_TICKS(100, APP_TIMER_PRESCALER)               /**< Time from the Connected event to first time sd_ble_gap_conn_param_update is called (100 milliseconds). */
-#define NEXT_CONN_PARAMS_UPDATE_DELAY        APP_TIMER_TICKS(500, APP_TIMER_PRESCALER)               /**< Time between each call to sd_ble_gap_conn_param_update after the first call (500 milliseconds). */
-#define MAX_CONN_PARAMS_UPDATE_COUNT         3                                                       /**< Number of attempts before giving up the connection parameter negotiation. */
-
-#define APP_ADV_INTERVAL                     MSEC_TO_UNITS(25, UNIT_0_625_MS)                        /**< The advertising interval (25 ms.). */
-#define APP_ADV_TIMEOUT_IN_SECONDS           BLE_GAP_ADV_TIMEOUT_GENERAL_UNLIMITED                   /**< The advertising timeout in units of seconds. This is set to @ref BLE_GAP_ADV_TIMEOUT_GENERAL_UNLIMITED so that the advertisement is done as long as there there is a call to @ref dfu_transport_close function.*/
-#define APP_DIRECTED_ADV_TIMEOUT             50                                                       /**< number of direct advertisement (each lasting 1.28seconds). */
-#define PEER_ADDRESS_TYPE_INVALID            0xFF                                                    /**< Value indicating that no valid peer address exists. This will be the case when a private resolvable address is used in which case there is no address available but instead an IRK is present. */   
-#define PEER_ADDRESS_TYPE_INVALID            0xFF                                                    /**< Value indicating that no valid peer address exists. This will be the case when a private resolvable address is used in which case there is no address available but instead an IRK is present. */   
-
-#define SEC_PARAM_TIMEOUT                    30                                                      /**< Timeout for Pairing Request or Security Request (in seconds). */
-#define SEC_PARAM_BOND                       0                                                       /**< Perform bonding. */
-#define SEC_PARAM_MITM                       0                                                       /**< Man In The Middle protection not required. */
-#define SEC_PARAM_IO_CAPABILITIES            BLE_GAP_IO_CAPS_NONE                                    /**< No I/O capabilities. */
-#define SEC_PARAM_OOB                        0                                                       /**< Out Of Band data not available. */
-#define SEC_PARAM_MIN_KEY_SIZE               7                                                       /**< Minimum encryption key size. */
-#define SEC_PARAM_MAX_KEY_SIZE               16                                                      /**< Maximum encryption key size. */
-
-#define MAX_SIZE_OF_BLE_STACK_EVT            (sizeof(ble_evt_t) + BLE_L2CAP_MTU_DEF)                 /**< Maximum size (in bytes) of the event received from S110 SoftDevice.*/
-#define NUM_WORDS_RESERVED_FOR_BLE_EVENTS    CEIL_DIV(MAX_SIZE_OF_BLE_STACK_EVT, sizeof(uint32_t))   /**< Size of the memory (in words) reserved for receiving S110 SoftDevice events. */
+#include "dfu_transport_ble.h"
 
 #define IS_CONNECTED()                       (m_conn_handle != BLE_CONN_HANDLE_INVALID)              /**< Macro to determine if the device is in connected state. */
-
-#define APP_FEATURE_NOT_SUPPORTED            BLE_GATT_STATUS_ATTERR_APP_BEGIN + 2                    /**< Reply when unsupported features are requested. */
-#define SD_IMAGE_SIZE_OFFSET                 0                                                       /**< Offset in start packet for the size information for SoftDevice. */
-#define BL_IMAGE_SIZE_OFFSET                 4                                                       /**< Offset in start packet for the size information for bootloader. */
-#define APP_IMAGE_SIZE_OFFSET                8                                                       /**< Offset in start packet for the size information for application. */
 
 
 /**@brief Packet type enumeration.
@@ -371,7 +327,7 @@ static void init_data_process(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
         {
             p_evt->evt.ble_dfu_pkt_write.p_data[pkt_length++] = 0;
         }
-        
+
         p_evt->evt.ble_dfu_pkt_write.len = pkt_length;
     }
 
@@ -786,13 +742,13 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
             {
                 uint8_t  sys_attr[128];
                 uint16_t sys_attr_len = 128;
-            
+
                 m_direct_adv_cnt = APP_DIRECTED_ADV_TIMEOUT;
                 nrf_gpio_pin_set(CONNECTED_LED_PIN_NO);
-        
-                err_code = sd_ble_gatts_sys_attr_get(m_conn_handle, 
-                                                     sys_attr, 
-                                                     &sys_attr_len, 
+
+                err_code = sd_ble_gatts_sys_attr_get(m_conn_handle,
+                                                     sys_attr,
+                                                     &sys_attr_len,
                                                      BLE_GATTS_SYS_ATTR_FLAG_SYS_SRVCS);
                 APP_ERROR_CHECK(err_code);
 
@@ -895,7 +851,7 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
                 ble_gap_enc_info_t * p_enc_info = NULL;
 
                 // If there is a match in diversifier then set the correct keys.
-                if (p_ble_evt->evt.gap_evt.params.sec_info_request.master_id.ediv == 
+                if (p_ble_evt->evt.gap_evt.params.sec_info_request.master_id.ediv ==
                     m_ble_peer_data.enc_key.master_id.ediv)
                 {
                     p_enc_info = &m_ble_peer_data.enc_key.enc_info;
