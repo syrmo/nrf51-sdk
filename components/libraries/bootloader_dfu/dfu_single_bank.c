@@ -17,8 +17,7 @@
 #include <dfu_types.h>
 #include "dfu_bank_internal.h"
 #include "nrf.h"
-#include "nrf51.h"
-#include "nrf51_bitfields.h"
+#include "nrf.h"
 #include "app_util.h"
 #include "nrf_sdm.h"
 #include "app_error.h"
@@ -40,7 +39,7 @@ static uint8_t                      m_init_packet[64];          /**< Init packet
 static uint8_t                      m_init_packet_length;       /**< Length of init packet received. */
 static uint16_t                     m_image_crc;                /**< Calculated CRC of the image received. */
 
-static app_timer_id_t               m_dfu_timer_id;             /**< Application timer id. */
+APP_TIMER_DEF(m_dfu_timer_id);                                  /**< Application timer id. */
 static bool                         m_dfu_timed_out = false;    /**< Boolean flag value for tracking DFU timer timeout state. */
 
 static pstorage_handle_t            m_storage_handle_app;       /**< Pstorage handle for the application area (bank 0). Bank used when updating a SoftDevice w/wo bootloader. Handle also used when swapping received application from bank 1 to bank 0. */
@@ -691,7 +690,7 @@ uint32_t dfu_sd_image_swap(void)
         uint32_t img_block_start = boot_settings.sd_image_start + 2 * block_size;
         uint32_t sd_block_start  = sd_start + 2 * block_size;
         
-        if (SOFTDEVICE_INFORMATION->softdevice_size < boot_settings.sd_image_size)
+        if (SD_SIZE_GET(MBR_SIZE) < boot_settings.sd_image_size)
         {
             // This will clear a page thus ensuring the old image is invalidated before swapping.
             err_code = dfu_copy_sd((uint32_t *)(sd_start + block_size), 
@@ -799,7 +798,7 @@ uint32_t dfu_sd_image_validate(void)
         uint32_t img_block_start = bootloader_settings.sd_image_start + 2 * block_size;
         uint32_t sd_block_start  = sd_start + 2 * block_size;
 
-        if (SOFTDEVICE_INFORMATION->softdevice_size < bootloader_settings.sd_image_size)
+        if (SD_SIZE_GET(MBR_SIZE) < bootloader_settings.sd_image_size)
         {
             return NRF_ERROR_NULL;
         }

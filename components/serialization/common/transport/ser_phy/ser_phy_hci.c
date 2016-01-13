@@ -22,11 +22,8 @@
 #include "ser_phy_hci.h"
 #include "crc16.h"
 #include "nrf_soc.h"
-
 #include "ser_config.h"
 #include "ser_phy_debug_comm.h"
-
-
 // hide globals for release version, expose for debug version
 #if defined(SER_PHY_HCI_DEBUG_ENABLE)
 #define _static
@@ -67,7 +64,6 @@
 #ifndef APP_TIMER_PRESCALER
 #define APP_TIMER_PRESCALER 0
 #endif
-#define APP_TIMER_ID_INVALID ((app_timer_id_t) 0xFFFFFFFFu)
 
 #define RETRANSMISSION_TIMEOUT_IN_TICKS (APP_TIMER_TICKS(RETRANSMISSION_TIMEOUT_IN_ms, \
                                                          APP_TIMER_PRESCALER)) /**< Retransmission timeout for application packet in units of timer ticks. */
@@ -180,11 +176,8 @@ _static uint32_t m_tx_retry_count;
 // _static uint32_t m_rx_drop_counter = 0;
 
 
-APP_MAILBOX_DEF(tx_evt_queue, TX_EVT_QUEUE_SIZE, hci_evt_t);
-APP_MAILBOX_DEF(rx_evt_queue, RX_EVT_QUEUE_SIZE, hci_evt_t);
-
-_static app_mailbox_id_t tx_evt_queue_id;
-_static app_mailbox_id_t rx_evt_queue_id;
+APP_MAILBOX_DEF(tx_evt_queue, TX_EVT_QUEUE_SIZE, sizeof(hci_evt_t));
+APP_MAILBOX_DEF(rx_evt_queue, RX_EVT_QUEUE_SIZE, sizeof(hci_evt_t));
 
 _static hci_tx_fsm_state_t m_hci_tx_fsm_state = HCI_TX_STATE_DISABLE;
 _static hci_rx_fsm_state_t m_hci_rx_fsm_state = HCI_RX_STATE_DISABLE;
@@ -192,11 +185,11 @@ _static hci_rx_fsm_state_t m_hci_rx_fsm_state = HCI_RX_STATE_DISABLE;
 #ifdef HCI_LINK_CONTROL
 _static hci_mode_t m_hci_mode                  = HCI_MODE_DISABLE;
 _static uint16_t   m_hci_link_control_next_pkt = HCI_PKT_SYNC;
-_static bool       m_hci_uther_side_active     = false;
+_static bool       m_hci_other_side_active     = false;
 #endif /* HCI_LINK_CONTROL */
 
 #ifdef HCI_APP_TIMER
-_static app_timer_id_t m_app_timer_id = APP_TIMER_ID_INVALID;
+APP_TIMER_DEF(m_app_timer_id);
 #endif
 
 _static bool m_tx_fsm_idle_flag = true;
@@ -236,7 +229,7 @@ static void hci_signal_timeout_event(void)
     hci_tx_event_handler(&event);
 #else
     hci_link_control_event_handler(&event);
-    if((m_hci_mode == HCI_MODE_ACTIVE) && m_hci_uther_side_active)
+    if((m_hci_mode == HCI_MODE_ACTIVE) && m_hci_other_side_active)
     {
         hci_tx_event_handler(&event);
     }
@@ -620,7 +613,6 @@ static uint16_t link_control_packet_decode(const uint8_t * p_buffer, uint32_t le
 static void ack_transmit(void)
 {
     uint32_t err_code;
-
     // TX ACK packet format:
     // - Unreliable Packet type
     // - Payload Length set to 0
@@ -709,6 +701,7 @@ static void error_callback(void)
     DEBUG_EVT_HCI_PHY_EVT_TX_ERROR(0);
 
     event.evt_type = SER_PHY_EVT_HW_ERROR;
+    event.evt_params.hw_error.p_buffer = m_p_tx_payload;
     ser_phy_event_callback(event);
 }
 
@@ -727,7 +720,7 @@ static void hci_slip_event_handler(ser_phy_hci_slip_evt_t * p_event)
 #ifndef HCI_LINK_CONTROL
         hci_tx_event_handler(&event);
 #else
-        if ((m_hci_mode == HCI_MODE_ACTIVE) && m_hci_uther_side_active)
+        if ((m_hci_mode == HCI_MODE_ACTIVE) && m_hci_other_side_active)
         {
             hci_tx_event_handler(&event);
         }
@@ -741,7 +734,7 @@ static void hci_slip_event_handler(ser_phy_hci_slip_evt_t * p_event)
 #ifndef HCI_LINK_CONTROL
         hci_rx_event_handler(&event);
 #else
-        if ((m_hci_mode == HCI_MODE_ACTIVE) && m_hci_uther_side_active)
+        if ((m_hci_mode == HCI_MODE_ACTIVE) && m_hci_other_side_active)
         {
             hci_rx_event_handler(&event);
         }
@@ -768,9 +761,14 @@ static void hci_slip_event_handler(ser_phy_hci_slip_evt_t * p_event)
 #ifndef HCI_LINK_CONTROL
             hci_tx_event_handler(&event);
 #else
-            if ((m_hci_mode == HCI_MODE_ACTIVE) && m_hci_uther_side_active)
+            if ((m_hci_mode == HCI_MODE_ACTIVE) && m_hci_other_side_active)
             {
                 hci_tx_event_handler(&event);
+            }
+            else
+            {
+                err_code = ser_phy_hci_slip_rx_buf_free(
+                      event.evt.ser_phy_slip_evt.evt_params.received_pkt.p_buffer);
             }
 #endif /* HCI_LINK_CONTROL */
         }
@@ -783,9 +781,14 @@ static void hci_slip_event_handler(ser_phy_hci_slip_evt_t * p_event)
 #ifndef HCI_LINK_CONTROL
                 hci_rx_event_handler(&event);
 #else
-                if ((m_hci_mode == HCI_MODE_ACTIVE) && m_hci_uther_side_active)
+                if ((m_hci_mode == HCI_MODE_ACTIVE) && m_hci_other_side_active)
                 {
                     hci_rx_event_handler(&event);
+                }
+                else
+                {
+                    err_code = ser_phy_hci_slip_rx_buf_free(
+                                    event.evt.ser_phy_slip_evt.evt_params.received_pkt.p_buffer);
                 }
 #endif /* HCI_LINK_CONTROL */
             }
@@ -926,7 +929,6 @@ static void hci_process_orphaned_ack(hci_evt_t * p_event)
     return;
 }
 
-
 /* main tx fsm   */
 static void hci_tx_fsm_event_process(hci_evt_t * p_event)
 {
@@ -1002,7 +1004,6 @@ static void hci_tx_fsm_event_process(hci_evt_t * p_event)
             else if (p_event->evt_source == HCI_TIMER_EVT)
             {
                 m_tx_retry_count--;
-
                 // m_tx_retx_counter++; // global retransmissions counter
                 if (m_tx_retry_count)
                 {
@@ -1133,11 +1134,25 @@ static void hci_rx_fsm_event_process(hci_evt_t * p_event)
                 }
                 m_hci_rx_fsm_state = HCI_RX_STATE_RECEIVE;
             }
+            else if ((p_event->evt_source == HCI_SLIP_EVT) &&
+                    (p_event->evt.ser_phy_slip_evt.evt_type == SER_PHY_HCI_SLIP_EVT_PKT_RECEIVED))
+            {
+                (void) ser_phy_hci_slip_rx_buf_free(p_event->evt.ser_phy_slip_evt.evt_params.received_pkt.p_buffer);
+            }
             break;
 
         case HCI_RX_STATE_WAIT_FOR_SLIP_NACK_END:
-            m_hci_rx_fsm_state = HCI_RX_STATE_RECEIVE;
+            if ((p_event->evt_source == HCI_SLIP_EVT) &&
+               (p_event->evt.ser_phy_slip_evt.evt_type == SER_PHY_HCI_SLIP_EVT_ACK_SENT))
+            {
+               m_hci_rx_fsm_state = HCI_RX_STATE_RECEIVE;
+            }
+            else
+            {
+               (void) ser_phy_hci_slip_rx_buf_free(p_event->evt.ser_phy_slip_evt.evt_params.received_pkt.p_buffer);
+            }
             break;
+
 
 #ifdef HCI_LINK_CONTROL
         case HCI_RX_STATE_DISABLE:
@@ -1165,7 +1180,7 @@ static void hci_tx_fsm(void)
     {
 
         CRITICAL_REGION_ENTER();
-        err_code = app_mailbox_get(tx_evt_queue_id, &event);
+        err_code = app_mailbox_get(&tx_evt_queue, &event);
 
         if (err_code != NRF_SUCCESS)
         {
@@ -1191,7 +1206,7 @@ static void hci_rx_fsm(void)
     while (err_code == NRF_SUCCESS)
     {
         CRITICAL_REGION_ENTER();
-        err_code = app_mailbox_get(rx_evt_queue_id, &event);
+        err_code = app_mailbox_get(&rx_evt_queue, &event);
 
         if (err_code != NRF_SUCCESS)
         {
@@ -1213,11 +1228,9 @@ static void hci_tx_reschedule()
 {
     bool     tx_exec_flag = false;
     uint32_t tx_queue_length;
-    uint32_t err_code;
 
     CRITICAL_REGION_ENTER();
-    err_code = app_mailbox_get_length(tx_evt_queue_id, &tx_queue_length);
-    ser_phy_hci_assert(err_code == NRF_SUCCESS);
+    tx_queue_length = app_mailbox_length_get(&tx_evt_queue);
 
 #ifndef HCI_LINK_CONTROL
     if (m_tx_fsm_idle_flag && m_hci_global_enable_flag && tx_queue_length)
@@ -1246,7 +1259,7 @@ static void hci_tx_event_handler(hci_evt_t * p_event)
     uint32_t err_code;
 
     CRITICAL_REGION_ENTER();
-    err_code = app_mailbox_put(tx_evt_queue_id, p_event);
+    err_code = app_mailbox_put(&tx_evt_queue, p_event);
     ser_phy_hci_assert(err_code == NRF_SUCCESS);
 
     // CRITICAL_REGION_ENTER();
@@ -1271,11 +1284,9 @@ static void hci_rx_reschedule()
 {
     bool     rx_exec_flag = false;
     uint32_t rx_queue_length;
-    uint32_t err_code;
 
     CRITICAL_REGION_ENTER();
-    err_code = app_mailbox_get_length(rx_evt_queue_id, &rx_queue_length);
-    ser_phy_hci_assert(err_code == NRF_SUCCESS);
+    rx_queue_length = app_mailbox_length_get(&rx_evt_queue);
 
 #ifndef HCI_LINK_CONTROL
     if (m_rx_fsm_idle_flag && m_hci_global_enable_flag && rx_queue_length)
@@ -1304,7 +1315,7 @@ static void hci_rx_event_handler(hci_evt_t * p_event)
     uint32_t err_code;
 
     CRITICAL_REGION_ENTER();
-    err_code = app_mailbox_put(rx_evt_queue_id, p_event);
+    err_code = app_mailbox_put(&rx_evt_queue, p_event);
     ser_phy_hci_assert(err_code == NRF_SUCCESS);
 
     /* only one process can acquire rx_exec_flag */
@@ -1353,7 +1364,7 @@ static void hci_link_control_event_handler(hci_evt_t * p_event)
                         m_packet_seq_number = INITIAL_SEQ_NUMBER;
                         m_hci_tx_fsm_state  = HCI_TX_STATE_DISABLE;
                         m_hci_rx_fsm_state  = HCI_RX_STATE_DISABLE;
-                        m_hci_uther_side_active = false;
+                        m_hci_other_side_active = false;
                     }
                     hci_link_control_pkt_send();
                     hci_timeout_setup(7u); // Need to trigger transmitting SYNC messages
@@ -1370,7 +1381,7 @@ static void hci_link_control_event_handler(hci_evt_t * p_event)
                     {
                         m_hci_link_control_next_pkt = HCI_PKT_CONFIG_RSP;
                         hci_link_control_pkt_send();
-                        m_hci_uther_side_active = true;
+                        m_hci_other_side_active = true;
                     }
                     break;
                 case HCI_PKT_CONFIG_RSP:
@@ -1386,7 +1397,7 @@ static void hci_link_control_event_handler(hci_evt_t * p_event)
             (void) ser_phy_hci_slip_rx_buf_free(
                 p_event->evt.ser_phy_slip_evt.evt_params.received_pkt.p_buffer);
             /* Kick the state machine so it can start process BLE packets */
-            if ((m_hci_mode == HCI_MODE_ACTIVE) && m_hci_uther_side_active)
+            if ((m_hci_mode == HCI_MODE_ACTIVE) && m_hci_other_side_active)
             {
                 hci_tx_reschedule();
                 hci_rx_reschedule();
@@ -1448,7 +1459,6 @@ void ser_phy_interrupts_enable(void)
     {
         hci_signal_timeout_event();
     }
-    ser_phy_hci_slip_interrupts_enable();
 
     return;
 }
@@ -1457,7 +1467,6 @@ void ser_phy_interrupts_enable(void)
 /* ser_phy API function */
 void ser_phy_interrupts_disable(void)
 {
-    ser_phy_hci_slip_interrupts_disable();
     CRITICAL_REGION_ENTER();
     m_hci_timer_enabled_flag = false;
     // transport calls PHY API with ser_phy_interrupts_disabled
@@ -1523,11 +1532,7 @@ static uint32_t  hci_timer_init(void)
 
 #ifdef HCI_APP_TIMER
 
-    // Create a timer instance only if it was not created before
-    if (m_app_timer_id == APP_TIMER_ID_INVALID)
-    {
-        err_code = app_timer_create(&m_app_timer_id, APP_TIMER_MODE_REPEATED, hci_timeout_handler);
-    }
+    err_code = app_timer_create(&m_app_timer_id, APP_TIMER_MODE_REPEATED, hci_timeout_handler);
 
     if (err_code != NRF_SUCCESS)
     {
@@ -1588,14 +1593,14 @@ uint32_t ser_phy_open(ser_phy_events_handler_t events_handler)
         return NRF_ERROR_INTERNAL;
     }
 
-    err_code = app_mailbox_create(APP_MAILBOX(tx_evt_queue), &tx_evt_queue_id);
+    err_code = app_mailbox_create(&tx_evt_queue);
 
     if (err_code != NRF_SUCCESS)
     {
         return NRF_ERROR_INTERNAL;
     }
 
-    err_code = app_mailbox_create(APP_MAILBOX(rx_evt_queue), &rx_evt_queue_id);
+    err_code = app_mailbox_create(&rx_evt_queue);
 
     if (err_code != NRF_SUCCESS)
     {
@@ -1620,7 +1625,8 @@ uint32_t ser_phy_open(ser_phy_events_handler_t events_handler)
         m_hci_rx_fsm_state  = HCI_RX_STATE_RECEIVE;
 #else
         hci_timeout_setup(7u);// Trigger sending SYNC messages
-        m_hci_mode          = HCI_MODE_UNINITIALIZED;
+        m_hci_mode              = HCI_MODE_UNINITIALIZED;
+        m_hci_other_side_active = false;
 #endif /*HCI_LINK_CONTROL*/
     }
     return err_code;

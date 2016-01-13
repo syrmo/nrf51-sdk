@@ -33,28 +33,64 @@ enum
     UNIT_10_MS    = 10000                               /**< Number of microseconds in 10 milliseconds. */
 };
 
-/**@brief Macro for doing static (i.e. compile time) assertion.
- *
- * @note If the assertion fails when compiling using Keil, the compiler will report error message
- *       "error: #94: the size of an array must be greater than zero" (while gcc will list the
- *       symbol static_assert_failed, making the error message more readable).
- *       If the supplied expression can not be evaluated at compile time, Keil will report
- *       "error: #28: expression must have a constant value".
- *
- * @note The macro is intentionally implemented not using do while(0), allowing it to be used
- *       outside function blocks (e.g. close to global type- and variable declarations).
- *       If used in a code block, it must be used before any executable code in this block.
- *
- * @param[in]   EXPR   Constant expression to be verified.
- */
 
-#if defined(__GNUC__)
-#define STATIC_ASSERT(EXPR) typedef char __attribute__((unused)) static_assert_failed[(EXPR) ? 1 : -1]
-#elif defined(__ICCARM__)
-#define STATIC_ASSERT(EXPR) extern char static_assert_failed[(EXPR) ? 1 : -1] 
+/**@brief Implementation specific macro for delayed macro expansion used in string concatenation
+*
+* @param[in]   lhs   Left hand side in concatenation
+* @param[in]   rhs   Right hand side in concatenation
+*/
+#define STRING_CONCATENATE_IMPL(lhs, rhs) lhs ## rhs
+
+
+/**@brief Macro used to concatenate string using delayed macro expansion
+*
+* @note This macro will delay concatenation until the expressions have been resolved
+*
+* @param[in]   lhs   Left hand side in concatenation
+* @param[in]   rhs   Right hand side in concatenation
+*/
+#define STRING_CONCATENATE(lhs, rhs) STRING_CONCATENATE_IMPL(lhs, rhs)
+
+
+// Disable lint-warnings/errors for STATIC_ASSERT
+//lint --emacro(10,STATIC_ASSERT)
+//lint --emacro(18,STATIC_ASSERT)
+//lint --emacro(19,STATIC_ASSERT)
+//lint --emacro(30,STATIC_ASSERT)
+//lint --emacro(37,STATIC_ASSERT)
+//lint --emacro(42,STATIC_ASSERT)
+//lint --emacro(26,STATIC_ASSERT)
+//lint --emacro(102,STATIC_ASSERT)
+//lint --emacro(533,STATIC_ASSERT)
+//lint --emacro(534,STATIC_ASSERT)
+//lint --emacro(132,STATIC_ASSERT)
+//lint --emacro(414,STATIC_ASSERT)
+//lint --emacro(578,STATIC_ASSERT)
+//lint --emacro(628,STATIC_ASSERT)
+//lint --emacro(648,STATIC_ASSERT)
+//lint --emacro(830,STATIC_ASSERT)
+
+
+/**@brief Macro for doing static (i.e. compile time) assertion.
+*
+* @note If the EXPR isn't resolvable, then the error message won't be shown.
+*
+* @note The output of STATIC_ASSERT_MSG will be different across different compilers.
+*
+* @param[in] EXPR Constant expression to be verified.
+*/
+#if defined ( __COUNTER__ )
+
+#define STATIC_ASSERT(EXPR) \
+    ;enum { STRING_CONCATENATE(static_assert_, __COUNTER__) = 1/(!!(EXPR)) }
+
 #else
-#define STATIC_ASSERT(EXPR) typedef char static_assert_failed[(EXPR) ? 1 : -1]
+
+#define STATIC_ASSERT(EXPR) \
+    ;enum { STRING_CONCATENATE(assert_line_, __LINE__) = 1/(!!(EXPR)) }
+
 #endif
+
 
 
 /**@brief type for holding an encoded (i.e. little endian) 16 bit unsigned integer. */
@@ -94,7 +130,6 @@ typedef struct
  */
 #define MSEC_TO_UNITS(TIME, RESOLUTION) (((TIME) * 1000) / (RESOLUTION))
 
-
 /**@brief Perform integer division, making sure the result is rounded up.
  *
  * @details One typical use for this is to compute the number of objects with size B is needed to
@@ -106,9 +141,27 @@ typedef struct
  * @return      Integer result of dividing A by B, rounded up.
  */
 #define CEIL_DIV(A, B)      \
-    /*lint -save -e573 */   \
-    ((((A) - 1) / (B)) + 1) \
-    /*lint -restore */
+    (((A) + (B) - 1) / (B))
+
+/**@brief Function for creating a buffer aligned to 4 bytes.
+ *
+ * @param[in]   NAME        Name of the buffor.
+ * @param[in]   MIN_SIZE    Size of this buffor (it will be rounded up to multiples of 4 bytes).
+ */
+#define WORD_ALIGNED_MEM_BUFF(NAME, MIN_SIZE) static uint32_t NAME[CEIL_DIV(MIN_SIZE, sizeof(uint32_t))]
+
+/**@brief Function for changing the value unit.
+ *
+ * @param[in]   value               Value to be rescaled.
+ * @param[in]   old_unit_reversal   Reversal of the incoming unit.
+ * @param[in]   new_unit_reversal   Reversal of the desired unit.
+ *
+ * @return      Number of bytes written.
+ */
+static __INLINE uint64_t value_rescale(uint32_t value, uint32_t old_unit_reversal, uint16_t new_unit_reversal)
+{
+    return (uint64_t)ROUNDED_DIV((uint64_t)value * new_unit_reversal, old_unit_reversal);
+}
 
 /**@brief Function for encoding a uint16 value.
  *
@@ -123,7 +176,22 @@ static __INLINE uint8_t uint16_encode(uint16_t value, uint8_t * p_encoded_data)
     p_encoded_data[1] = (uint8_t) ((value & 0xFF00) >> 8);
     return sizeof(uint16_t);
 }
-    
+
+/**@brief Function for encoding a three-byte value.
+ *
+ * @param[in]   value            Value to be encoded.
+ * @param[out]  p_encoded_data   Buffer where the encoded data is to be written.
+ *
+ * @return      Number of bytes written.
+ */
+static __INLINE uint8_t uint24_encode(uint32_t value, uint8_t * p_encoded_data)
+{
+    p_encoded_data[0] = (uint8_t) ((value & 0x000000FF) >> 0);
+    p_encoded_data[1] = (uint8_t) ((value & 0x0000FF00) >> 8);
+    p_encoded_data[2] = (uint8_t) ((value & 0x00FF0000) >> 16);
+    return 3;
+}
+
 /**@brief Function for encoding a uint32 value.
  *
  * @param[in]   value            Value to be encoded.
@@ -152,6 +220,19 @@ static __INLINE uint16_t uint16_decode(const uint8_t * p_encoded_data)
                  (((uint16_t)((uint8_t *)p_encoded_data)[1]) << 8 ));
 }
 
+/**@brief Function for decoding a three-byte value.
+ *
+ * @param[in]   p_encoded_data   Buffer where the encoded data is stored.
+ *
+ * @return      Decoded value (uint32_t).
+ */
+static __INLINE uint32_t uint24_decode(const uint8_t * p_encoded_data)
+{
+    return ( (((uint32_t)((uint8_t *)p_encoded_data)[0]) << 0)  |
+             (((uint32_t)((uint8_t *)p_encoded_data)[1]) << 8)  |
+             (((uint32_t)((uint8_t *)p_encoded_data)[2]) << 16));
+}
+
 /**@brief Function for decoding a uint32 value.
  *
  * @param[in]   p_encoded_data   Buffer where the encoded data is stored.
@@ -165,7 +246,7 @@ static __INLINE uint32_t uint32_decode(const uint8_t * p_encoded_data)
              (((uint32_t)((uint8_t *)p_encoded_data)[2]) << 16) |
              (((uint32_t)((uint8_t *)p_encoded_data)[3]) << 24 ));
 }
-    
+
 /** @brief Function for converting the input voltage (in milli volts) into percentage of 3.0 Volts.
  *
  *  @details The calculation is based on a linearized version of the battery's discharge
@@ -224,7 +305,7 @@ static __INLINE uint8_t battery_level_in_percent(const uint16_t mvolts)
  *
  * @return      TRUE if pointer is aligned to a 4 byte boundary, FALSE otherwise.
  */
-static __INLINE bool is_word_aligned(void * p)
+static __INLINE bool is_word_aligned(void const* p)
 {
     return (((uintptr_t)p & 0x03) == 0);
 }
